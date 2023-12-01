@@ -109,9 +109,6 @@ app.post('/record', async (req: Request, res: Response) => {
     });
   };
 
-  // Initial publish
-  await publishMessage();
-
   // Retry logic
   // eslint-disable-next-line @typescript-eslint/no-misused-promises
   const retryPublish = setInterval(async () => {
@@ -142,6 +139,22 @@ app.post('/record', async (req: Request, res: Response) => {
       }
     }
   }, retryInterval);
+
+  // Initial publish
+  try {
+    await publishMessage();
+  } catch (error) {
+    // Handle errors from publishMessage
+    console.error('Error publishing message:', error);
+    if (retries >= maxRetries) {
+      clearInterval(retryPublish);
+      if (!res.headersSent) {
+        res.status(500).send({
+          message: 'Failed to send record for auditing',
+        });
+      }
+    }
+  }
 
   let responseSent = false;
 
