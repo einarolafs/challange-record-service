@@ -1,0 +1,14 @@
+{
+  "compilerOptions": {
+    "target": "es6", // Set the JavaScript language version for output
+    "module": "commonjs", // Specify module code generation
+    "strict": true, // Enable all strict type-checking options
+    "esModuleInterop": true, // Enables compatibility with default import syntax in modules
+    "skipLibCheck": true, // Skip type checking of declaration files
+    "forceConsistentCasingInFileNames": true, // Disallow inconsistently-cased references to the same file
+    "outDir": "./dist", // Redirect output structure to the directory
+    "noImplicitAny": false
+  },
+  "include": ["**/*.ts"], // Include all TypeScript files in the project
+  "exclude": ["node_modules", ".eslintrc.js"] // Exclude the node_modules directory
+}

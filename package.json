@@ -1,0 +1,42 @@
+{
+  "name": "distributed-system-challenge",
+  "version": "1.0.0",
+  "description": "A mock-up for a distributed system with RecordService, AuditPointService, and a Message Broker",
+  "main": "index.js",
+  "scripts": {
+    "start-record": "ts-node RecordService/index.ts",
+    "start-audit": "ts-node AuditPointService/index.ts",
+    "start-broker": "ts-node MessageBroker/index.ts",
+    "start-all": "concurrently \"npm run start-record\" \"npm run start-audit\" \"npm run start-broker\"",
+    "build": "tsc"
+  },
+  "dependencies": {
+    "@types/amqplib": "^0.10.4",
+    "@types/express": "^4.17.21",
+    "aedes": "^0.50.0",
+    "aedes-persistence": "^9.1.2",
+    "amqplib": "^0.10.3",
+    "axios": "^1.6.2",
+    "concurrently": "^8.2.2",
+    "express": "^4.18.2",
+    "mongoose": "^8.0.2",
+    "mosca": "^2.8.3",
+    "mqtt": "^5.3.1",
+    "sequelize": "^6.35.1",
+    "ts-node": "^10.9.1"
+  },
+  "devDependencies": {
+    "@types/mosca": "^2.8.8",
+    "@typescript-eslint/eslint-plugin": "^6.13.1",
+    "@typescript-eslint/parser": "^6.13.1",
+    "eslint": "^8.54.0",
+    "eslint-config-prettier": "^9.0.0",
+    "eslint-config-standard-with-typescript": "^40.0.0",
+    "eslint-plugin-import": "^2.29.0",
+    "eslint-plugin-n": "^16.3.1",
+    "eslint-plugin-prettier": "^5.0.1",
+    "eslint-plugin-promise": "^6.1.1",
+    "prettier": "^3.1.0",
+    "typescript": "^5.3.2"
+  }
+}
