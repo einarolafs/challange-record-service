@@ -1,7 +1,7 @@
 import express, { type Request, type Response } from 'express';
 import mqtt from 'mqtt';
 import { v4 as uuidv4 } from 'uuid';
-import * as http from 'http';
+import * as http from 'http'; // Import the 'http' module
 
 import { type Record, type User } from './types';
 import { isValidRecord, isValidUser } from './validators';
@@ -50,8 +50,9 @@ app.get('/health', (req, res) => {
 
 // eslint-disable-next-line @typescript-eslint/no-misused-promises
 app.post('/record', async (req: Request, res: Response) => {
-  let responseSent = false; // Flag to track if a response has been sent
   try {
+    let responseSent = false; // Initialize responseSent here
+
     // Send the health check request using the abstracted function
     const healthResponse = await sendHttpRequest({
       hostname: 'localhost',
@@ -63,7 +64,7 @@ app.post('/record', async (req: Request, res: Response) => {
     if (healthResponse.statusCode !== 200) {
       // Health check failed, return an error response
       res.status(500).send({ message: 'Health check failed' });
-      responseSent = true; // Set the flag to true
+      responseSent = true; // Set responseSent to true
       return;
     }
 
@@ -73,6 +74,7 @@ app.post('/record', async (req: Request, res: Response) => {
     if (!isValidRecord(recordData)) {
       // Invalid record format, return an error response
       res.status(400).send({ message: 'Invalid record format' });
+      responseSent = true; // Set responseSent to true
       return;
     }
 
@@ -123,6 +125,7 @@ app.post('/record', async (req: Request, res: Response) => {
               res
                 .status(500)
                 .send({ message: 'Failed to send record for auditing' });
+              responseSent = true; // Set responseSent to true
               reject(err);
             }
           } else {
@@ -155,6 +158,7 @@ app.post('/record', async (req: Request, res: Response) => {
           res
             .status(500)
             .send({ message: 'Failed to send record for auditing' });
+          responseSent = true; // Set responseSent to true
         }
       }
     };
@@ -174,24 +178,22 @@ app.post('/record', async (req: Request, res: Response) => {
     // Acknowledgment listener
     client.subscribe(`ackQueue/${recordData.recordId}`, () => {
       client.on('message', (topic, buffer) => {
-        if (topic === `ackQueue/${recordData.recordId}`) {
+        if (topic === `ackQueue/${recordData.recordId}` && !responseSent) {
           // Check the flag
-          if (!responseSent) {
-            responseSent = true; // Set the flag to true to prevent multiple responses
-            clearInterval(retryPublishInterval); // Stop retrying on acknowledgment
-            const pendingRecord = pendingRecords.get(recordId);
-            if (pendingRecord != null) {
-              recordsDb.set(recordId, pendingRecord);
-              pendingRecords.delete(recordId);
-              console.log(
-                `Record ${recordData.recordId} processed and ${operationType}.`
-              );
-              res.status(200).send({
-                message: `Record successfully ${operationType} with id ${recordData.recordId}`,
-              });
-            }
-            client.unsubscribe(`ackQueue/${recordData.recordId}`);
+          responseSent = true; // Set the flag to true to prevent multiple responses
+          clearInterval(retryPublishInterval); // Stop retrying on acknowledgment
+          const pendingRecord = pendingRecords.get(recordId);
+          if (pendingRecord != null) {
+            recordsDb.set(recordId, pendingRecord);
+            pendingRecords.delete(recordId);
+            console.log(
+              `Record ${recordData.recordId} processed and ${operationType}.`
+            );
+            res.status(200).send({
+              message: `Record successfully ${operationType} with id ${recordData.recordId}`,
+            });
           }
+          client.unsubscribe(`ackQueue/${recordData.recordId}`);
         }
       });
     });
@@ -203,7 +205,7 @@ app.post('/record', async (req: Request, res: Response) => {
   } catch (error) {
     // Handle errors here
     console.error('Error processing record:', error);
-    if (!responseSent) {
+    if (!res.headersSent) {
       res.status(500).send({ message: 'Failed to process record' });
     }
   }
