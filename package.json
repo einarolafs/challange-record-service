@@ -23,7 +23,8 @@
     "mosca": "^2.8.3",
     "mqtt": "^5.3.1",
     "sequelize": "^6.35.1",
-    "ts-node": "^10.9.1"
+    "ts-node": "^10.9.1",
+    "uuid": "^9.0.1"
   },
   "devDependencies": {
     "@types/mosca": "^2.8.8",
