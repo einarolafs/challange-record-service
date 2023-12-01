@@ -8,14 +8,20 @@ import { type Record, type User } from './types';
 import { isValidRecord, isValidUser } from './validators';
 import { populateFakeData } from './fakeData';
 
+// Create an Express application
 const app = express();
 app.use(express.json());
 
+// Connect to the MQTT broker
 const client = mqtt.connect('mqtt://localhost');
 
+// Simulated database for records
 const recordsDb = populateFakeData();
+
+// Temporary storage for records awaiting acknowledgment
 const pendingRecords = new Map<string, Record>();
 
+// Function to send an HTTP request and return the response
 const sendHttpRequest = async (
   options: http.RequestOptions
 ): Promise<http.IncomingMessage> => {
@@ -32,6 +38,7 @@ const sendHttpRequest = async (
   });
 };
 
+// Function to send an error response if headers are not already sent
 const sendErrorResponse = (
   res: Response,
   statusCode: number,
@@ -42,6 +49,63 @@ const sendErrorResponse = (
   }
 };
 
+// Function to perform a health check
+const sendHealthCheckRequest = async (): Promise<boolean> => {
+  try {
+    const healthResponse = await sendHttpRequest({
+      hostname: 'localhost',
+      port: 3000,
+      path: '/health',
+      method: 'GET',
+    });
+
+    return healthResponse.statusCode === 200;
+  } catch (error) {
+    return false;
+  }
+};
+
+// Function to publish a message to the audit queue
+const publishMessage = async (message: string): Promise<void> => {
+  await new Promise<void>((resolve, reject) => {
+    client.publish('auditQueue', message, {}, (err) => {
+      if (err != null) {
+        console.error('Failed to publish message:', err);
+        reject(err);
+      } else {
+        resolve();
+      }
+    });
+  });
+};
+
+// Function to handle the retry logic for publishing a message
+const retryPublish = async (
+  res: Response,
+  recordData: Record,
+  operationType: string,
+  retries: number,
+  maxRetries: number,
+  retryInterval: number,
+  message: string // Added message parameter here
+): Promise<void> => {
+  while (retries < maxRetries) {
+    try {
+      await publishMessage(message); // Pass the message parameter here
+      retries++;
+    } catch (error) {
+      console.error('Error publishing message:', error);
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, retryInterval));
+  }
+
+  if (!res.headersSent) {
+    sendErrorResponse(res, 500, 'Failed to send record for auditing');
+  }
+};
+
+// Route handler for health check
 const handleHealthCheck = async (
   req: Request,
   res: Response
@@ -57,18 +121,14 @@ const handleHealthCheck = async (
   }
 };
 
+// Route handler for creating or updating a record
 const handleRecordPost = async (req: Request, res: Response): Promise<void> => {
   try {
     let responseSent = false;
 
-    const healthResponse = await sendHttpRequest({
-      hostname: 'localhost',
-      port: 3000,
-      path: '/health',
-      method: 'GET',
-    });
+    const healthCheckPassed = await sendHealthCheckRequest();
 
-    if (healthResponse.statusCode !== 200) {
+    if (!healthCheckPassed) {
       sendErrorResponse(res, 500, 'Health check failed');
       responseSent = true;
       return;
@@ -115,55 +175,21 @@ const handleRecordPost = async (req: Request, res: Response): Promise<void> => {
       recordId,
     });
 
-    let retries = 0;
+    const retries = 0;
     const maxRetries = 5;
     const retryInterval = 2000;
 
-    const publishMessage = async (): Promise<void> => {
-      await new Promise<void>((resolve, reject) => {
-        client.publish('auditQueue', message, {}, (err) => {
-          if (err != null) {
-            console.error('Failed to publish message:', err);
-            if (retries >= maxRetries) {
-              sendErrorResponse(res, 500, 'Failed to send record for auditing');
-              responseSent = true;
-              reject(err);
-            }
-          } else {
-            resolve();
-          }
-        });
-      });
-    };
-
-    const retryPublish: () => Promise<void> = async () => {
-      while (retries < maxRetries) {
-        try {
-          await publishMessage();
-          retries++;
-        } catch (error) {
-          console.error('Error publishing message:', error);
-        }
-
-        await new Promise((resolve) => setTimeout(resolve, retryInterval));
-      }
-
-      if (!responseSent) {
-        clearInterval(retryPublishInterval);
-        if (!res.headersSent) {
-          sendErrorResponse(res, 500, 'Failed to send record for auditing');
-          responseSent = true;
-        }
-      }
-    };
-
-    try {
-      await publishMessage();
-    } catch (error) {
-      console.error('Error publishing message:', error);
-    }
-
-    const retryPublishInterval = setInterval(retryPublish, retryInterval);
+    const retryPublishInterval = setInterval(async () => {
+      await retryPublish(
+        res,
+        recordData,
+        operationType,
+        retries,
+        maxRetries,
+        retryInterval,
+        message // Pass the message parameter here
+      );
+    }, retryInterval);
 
     client.subscribe(`ackQueue/${recordData.recordId}`, () => {
       client.on('message', (topic, buffer) => {
@@ -197,11 +223,11 @@ const handleRecordPost = async (req: Request, res: Response): Promise<void> => {
   }
 };
 
-// eslint-disable-next-line @typescript-eslint/no-misused-promises
+// Define routes
 app.get('/health', handleHealthCheck);
-// eslint-disable-next-line @typescript-eslint/no-misused-promises
 app.post('/record', handleRecordPost);
 
+// Start the Express server on port 3000
 const port = 3000;
 app.listen(port, () => {
   console.log(`RecordService running on port ${port}`);
