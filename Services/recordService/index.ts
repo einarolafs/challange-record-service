@@ -17,13 +17,37 @@ const recordsDb = populateFakeData();
 // Temporary storage for records awaiting acknowledgment
 const pendingRecords = new Map<string, Record>();
 
-app.get('/health', (req: Request, res: Response) => {
-  res.status(200).send({ status: 'healthy' });
+app.get('/health', (req, res) => {
+  // Simulate a health issue randomly (for testing purposes)
+  const isHealthy: number = 200; // Adjust the probability as needed
+
+  if (isHealthy === 200) {
+    res.status(200).send({ status: 'healthy' });
+  } else {
+    // Simulate a health issue by throwing an error
+    const errorMessage = 'Health check failed';
+    console.error(errorMessage);
+    res.status(500).send({ status: 'unhealthy', error: errorMessage });
+  }
 });
 
-app.post('/record', (req: Request, res: Response) => {
-  if (!isValidRecord(req.body)) {
-    return res.status(400).send({ message: 'Invalid record format' });
+// eslint-disable-next-line @typescript-eslint/no-misused-promises
+app.post('/record', async (req: Request, res: Response) => {
+  // Wrap the entire handler in an async function
+  try {
+    // Check the health of the /health endpoint
+    const healthResponse = await fetch('http://localhost:3000/health');
+    if (healthResponse.status !== 200) {
+      // Health check failed, return an error response
+      return res.status(500).send({ message: 'Health check failed' });
+    }
+
+    if (!isValidRecord(req.body)) {
+      return res.status(400).send({ message: 'Invalid record format' });
+    }
+  } catch (error) {
+    console.error('Error checking health:', error);
+    return res.status(500).send({ message: 'Failed to check health' });
   }
 
   const recordData: Record = req.body;
@@ -67,27 +91,34 @@ app.post('/record', (req: Request, res: Response) => {
   const maxRetries = 5;
   const retryInterval = 2000; // milliseconds
 
-  const publishMessage = (): void => {
-    client.publish('auditQueue', message, {}, (err) => {
-      if (err != null) {
-        console.error('Failed to publish message:', err);
-        if (retries >= maxRetries) {
-          res
-            .status(500)
-            .send({ message: 'Failed to send record for auditing' });
+  const publishMessage = async (): Promise<void> => {
+    await new Promise<void>((resolve, reject) => {
+      client.publish('auditQueue', message, {}, (err) => {
+        if (err != null) {
+          console.error('Failed to publish message:', err);
+          if (retries >= maxRetries) {
+            res
+              .status(500)
+              .send({ message: 'Failed to send record for auditing' });
+            reject(err);
+          }
+        } else {
+          resolve();
         }
-      }
+      });
     });
   };
 
   // Initial publish
-  publishMessage();
+  await publishMessage();
 
   // Retry logic
-  const retryPublish = setInterval(() => {
+  // eslint-disable-next-line @typescript-eslint/no-misused-promises
+  const retryPublish = setInterval(async () => {
     if (retries >= maxRetries) {
       clearInterval(retryPublish);
       if (!res.headersSent) {
+        // Only send a response if one hasn't been sent already
         res.status(500).send({
           message:
             'AuditPoint Service is unavailable, failed to process record',
@@ -95,14 +126,31 @@ app.post('/record', (req: Request, res: Response) => {
       }
       return;
     }
-    publishMessage();
-    retries++;
+    try {
+      await publishMessage();
+      retries++;
+    } catch (error) {
+      // Handle errors from publishMessage
+      console.error('Error publishing message:', error);
+      if (retries >= maxRetries) {
+        clearInterval(retryPublish);
+        if (!res.headersSent) {
+          res.status(500).send({
+            message: 'Failed to send record for auditing',
+          });
+        }
+      }
+    }
   }, retryInterval);
+
+  let responseSent = false;
 
   // Acknowledgment listener
   client.subscribe(`ackQueue/${recordData.recordId}`, () => {
     client.on('message', (topic, buffer) => {
-      if (topic === `ackQueue/${recordData.recordId}`) {
+      if (topic === `ackQueue/${recordData.recordId}` && !responseSent) {
+        // Check the flag
+        responseSent = true; // Set the flag to true to prevent multiple responses
         clearInterval(retryPublish); // Stop retrying on acknowledgment
         const pendingRecord = pendingRecords.get(recordId);
         if (pendingRecord != null) {
@@ -111,9 +159,9 @@ app.post('/record', (req: Request, res: Response) => {
           console.log(
             `Record ${recordData.recordId} processed and ${operationType}.`
           );
-          res
-            .status(200)
-            .send({ message: `Record successfully ${operationType}.` });
+          res.status(200).send({
+            message: `Record successfully ${operationType} with id ${recordData.recordId}`,
+          });
         }
         client.unsubscribe(`ackQueue/${recordData.recordId}`);
       }
