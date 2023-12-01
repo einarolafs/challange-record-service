@@ -4,8 +4,8 @@
   "description": "A mock-up for a distributed system with RecordService, AuditPointService, and a Message Broker",
   "main": "index.js",
   "scripts": {
-    "start-record": "ts-node RecordService/index.ts",
-    "start-audit": "ts-node AuditPointService/index.ts",
+    "start-record": "ts-node Services/RecordService/index.ts",
+    "start-audit": "ts-node Services/AuditPointService/index.ts",
     "start-broker": "ts-node MessageBroker/index.ts",
     "start-all": "concurrently \"npm run start-record\" \"npm run start-audit\" \"npm run start-broker\"",
     "build": "tsc"
