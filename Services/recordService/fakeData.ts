@@ -9,7 +9,6 @@ const fakeRecords: Record[] = [
     quantity: 100,
     unit: 'kg',
   },
-  // ... add more fake records as needed
 ];
 
 export function populateFakeData(): Map<string, Record> {

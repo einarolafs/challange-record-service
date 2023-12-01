@@ -81,3 +81,7 @@ curl -X POST -H "Content-Type: application/json" -d '{
 ```
 
 This should provide a error that the payload is not correctly formatted
+
+#### Turn off and on AuditPoint Service
+
+If the AuditPoint service cannot be reach, the Record Service will continue trying to reconnect until it times out.

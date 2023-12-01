@@ -1,17 +1,18 @@
 import express, { type Request, type Response } from 'express';
 import mqtt from 'mqtt';
 import { v4 as uuidv4 } from 'uuid';
+import * as http from 'http'; // Import the 'http' module
 
-import { type Record, type User } from './types'; // Assuming these are defined in types.ts
-import { isValidRecord, isValidUser } from './validators'; // Assuming these are defined in validators.ts
-import { populateFakeData } from './fakeData'; // Assuming this provides initial data
+import { type Record, type User } from './types';
+import { isValidRecord, isValidUser } from './validators';
+import { populateFakeData } from './fakeData';
 
 const app = express();
 app.use(express.json());
 
 const client = mqtt.connect('mqtt://localhost');
 
-// Using Map to simulate a database for records
+// Simulate a database for records
 const recordsDb = populateFakeData();
 
 // Temporary storage for records awaiting acknowledgment
@@ -19,12 +20,11 @@ const pendingRecords = new Map<string, Record>();
 
 app.get('/health', (req, res) => {
   // Simulate a health issue randomly (for testing purposes)
-  const isHealthy: number = 200; // Adjust the probability as needed
+  const isHealthy: number = 200;
 
   if (isHealthy === 200) {
     res.status(200).send({ status: 'healthy' });
   } else {
-    // Simulate a health issue by throwing an error
     const errorMessage = 'Health check failed';
     console.error(errorMessage);
     res.status(500).send({ status: 'unhealthy', error: errorMessage });
@@ -33,27 +33,45 @@ app.get('/health', (req, res) => {
 
 // eslint-disable-next-line @typescript-eslint/no-misused-promises
 app.post('/record', async (req: Request, res: Response) => {
-  // Wrap the entire handler in an async function
   try {
-    // Check the health of the /health endpoint
-    const healthResponse = await fetch('http://localhost:3000/health');
-    if (healthResponse.status !== 200) {
-      // Health check failed, return an error response
-      return res.status(500).send({ message: 'Health check failed' });
-    }
+    // Create an options object for the HTTP request
+    const options = {
+      hostname: 'localhost',
+      port: 3000,
+      path: '/health',
+      method: 'GET',
+    };
 
-    if (!isValidRecord(req.body)) {
-      return res.status(400).send({ message: 'Invalid record format' });
-    }
+    // Create an HTTP request
+    const reqHttp = http.request(options, (healthResponse) => {
+      if (healthResponse.statusCode !== 200) {
+        // Health check failed, return an error response
+        res.status(500).send({ message: 'Health check failed' });
+        return;
+      }
+
+      if (!isValidRecord(req.body)) {
+        res.status(400).send({ message: 'Invalid record format' });
+      }
+    });
+
+    // Handle errors on the request
+    reqHttp.on('error', (error) => {
+      console.error('Error checking health:', error);
+      res.status(500).send({ message: 'Failed to check health' });
+    });
+
+    // Send the request
+    reqHttp.end();
   } catch (error) {
     console.error('Error checking health:', error);
-    return res.status(500).send({ message: 'Failed to check health' });
+    res.status(500).send({ message: 'Failed to check health' });
   }
 
   const recordData: Record = req.body;
   let operationType = '';
 
-  // Simulate user data extraction, here assuming the request body includes user info
+  // Simulate user data extraction
   const userData: User = {
     userId: recordData.userId,
     name: '', // This should be provided in the request or fetched from a user service
@@ -110,35 +128,30 @@ app.post('/record', async (req: Request, res: Response) => {
   };
 
   // Retry logic
-  // eslint-disable-next-line @typescript-eslint/no-misused-promises
-  const retryPublish = setInterval(async () => {
-    if (retries >= maxRetries) {
-      clearInterval(retryPublish);
+  // eslint-disable-next-line @typescript-eslint/explicit-function-return-type
+  const retryPublish = async () => {
+    while (retries < maxRetries) {
+      try {
+        await publishMessage();
+        retries++;
+      } catch (error) {
+        // Handle errors from publishMessage
+        console.error('Error publishing message:', error);
+      }
+
+      // Sleep for retryInterval milliseconds before the next retry
+      await new Promise((resolve) => setTimeout(resolve, retryInterval));
+    }
+
+    // If max retries reached without success
+    if (!responseSent) {
+      clearInterval(retryPublishInterval);
       if (!res.headersSent) {
         // Only send a response if one hasn't been sent already
-        res.status(500).send({
-          message:
-            'AuditPoint Service is unavailable, failed to process record',
-        });
-      }
-      return;
-    }
-    try {
-      await publishMessage();
-      retries++;
-    } catch (error) {
-      // Handle errors from publishMessage
-      console.error('Error publishing message:', error);
-      if (retries >= maxRetries) {
-        clearInterval(retryPublish);
-        if (!res.headersSent) {
-          res.status(500).send({
-            message: 'Failed to send record for auditing',
-          });
-        }
+        res.status(500).send({ message: 'Failed to send record for auditing' });
       }
     }
-  }, retryInterval);
+  };
 
   // Initial publish
   try {
@@ -146,15 +159,10 @@ app.post('/record', async (req: Request, res: Response) => {
   } catch (error) {
     // Handle errors from publishMessage
     console.error('Error publishing message:', error);
-    if (retries >= maxRetries) {
-      clearInterval(retryPublish);
-      if (!res.headersSent) {
-        res.status(500).send({
-          message: 'Failed to send record for auditing',
-        });
-      }
-    }
   }
+
+  // Start the retry logic
+  const retryPublishInterval = setInterval(retryPublish, retryInterval);
 
   let responseSent = false;
 
@@ -164,7 +172,7 @@ app.post('/record', async (req: Request, res: Response) => {
       if (topic === `ackQueue/${recordData.recordId}` && !responseSent) {
         // Check the flag
         responseSent = true; // Set the flag to true to prevent multiple responses
-        clearInterval(retryPublish); // Stop retrying on acknowledgment
+        clearInterval(retryPublishInterval); // Stop retrying on acknowledgment
         const pendingRecord = pendingRecords.get(recordId);
         if (pendingRecord != null) {
           recordsDb.set(recordId, pendingRecord);
@@ -183,7 +191,7 @@ app.post('/record', async (req: Request, res: Response) => {
 
   // Clear interval on response end to prevent memory leaks
   res.on('finish', () => {
-    clearInterval(retryPublish);
+    clearInterval(retryPublishInterval);
   });
 });
 
